@@ -1067,4 +1067,16 @@
     <string name="wearos_play_on_phone" tools:ignore="UnusedResources">Play on phone</string>
     <string name="wearos_browse_phone" tools:ignore="UnusedResources">Browse phone</string>
     <string name="wearos_open_on_phone" tools:ignore="UnusedResources">Open on phone</string>
+    <string name="ad_removal_server">Ad-removal server</string>
+    <string name="ad_removal_server_summary">Enter your MinusPod HTTPS address to offer server processing when subscribing. Leave empty to disable.</string>
+    <string name="ad_removal_invalid_url">Enter an HTTPS server address without a username, password, query, or fragment.</string>
+    <string name="ad_removal_subscribe_title">How would you like to subscribe?</string>
+    <string name="ad_removal_subscribe_message">Send this podcast’s feed address to your MinusPod server and subscribe to its processed feed. Automatic processing will be enabled for this podcast, and only finished episodes will appear.</string>
+    <string name="ad_removal_subscribe">Remove ads via server</string>
+    <string name="ad_removal_subscribe_original">Original feed</string>
+    <string name="ad_removal_connecting">Connecting to server…</string>
+    <string name="ad_removal_processing">Subscribed. Episodes will appear as your server finishes processing them.</string>
+    <string name="ad_removal_failed">Could not complete the server subscription. Check the server address, password, and connection. The server may already have added the podcast; trying again will look for it first.</string>
+    <string name="ad_removal_password">MinusPod password</string>
+    <string name="ad_removal_password_message">Enter your server’s application password. It will only be used for this subscription and will not be saved.</string>
 </resources>
