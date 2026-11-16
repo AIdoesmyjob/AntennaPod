@@ -125,6 +125,8 @@ dependencies {
     implementation libs.recyclerview.swipedecorator
 
     testImplementation libs.androidx.test.core
+    testImplementation libs.okhttp.mockwebserver
+    testImplementation libs.okhttp.tls
     testImplementation libs.junit
     testImplementation libs.robolectric
 

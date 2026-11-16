@@ -3,6 +3,8 @@ package de.danoeh.antennapod.ui.screen.feed;
 import android.content.res.Configuration;
 import android.graphics.LightingColorFilter;
 import android.os.Bundle;
+import android.text.InputType;
+import android.widget.Toast;
 import android.util.Log;
 import android.view.ContextMenu;
 import android.view.KeyEvent;
@@ -17,6 +19,8 @@ import androidx.core.util.Pair;
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentActivity;
 import androidx.recyclerview.widget.RecyclerView;
+import androidx.preference.PreferenceManager;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.bumptech.glide.Glide;
 import com.bumptech.glide.request.RequestOptions;
 import com.google.android.material.appbar.MaterialToolbar;
@@ -37,6 +41,10 @@ import de.danoeh.antennapod.model.feed.Feed;
 import de.danoeh.antennapod.model.feed.FeedItem;
 import de.danoeh.antennapod.model.feed.FeedItemFilter;
 import de.danoeh.antennapod.net.download.serviceinterface.FeedUpdateManager;
+import de.danoeh.antennapod.net.adremoval.MinusPodClient;
+import de.danoeh.antennapod.net.adremoval.ProcessedFeedSubscription;
+import de.danoeh.antennapod.net.common.AntennapodHttpClient;
+import de.danoeh.antennapod.ui.common.databinding.EditTextDialogBinding;
 import de.danoeh.antennapod.storage.database.DBReader;
 import de.danoeh.antennapod.storage.database.DBWriter;
 import de.danoeh.antennapod.storage.preferences.UserPreferences;
@@ -97,6 +105,7 @@ public class FeedItemlistFragment extends Fragment implements AdapterView.OnItem
     private long feedID;
     private Feed feed;
     private Disposable disposable;
+    private Disposable serverSubscription;
     private FeedItemListFragmentBinding viewBinding;
     private Pair<Integer, Integer> scrollPosition = null;
 
@@ -255,6 +264,10 @@ public class FeedItemlistFragment extends Fragment implements AdapterView.OnItem
         EventBus.getDefault().unregister(this);
         if (disposable != null) {
             disposable.dispose();
+        }
+        if (serverSubscription != null) {
+            serverSubscription.dispose();
+            serverSubscription = null;
         }
         adapter.endSelectMode();
     }
@@ -532,6 +545,7 @@ public class FeedItemlistFragment extends Fragment implements AdapterView.OnItem
         viewBinding.header.butFilter.setVisibility(showSettingsButtons ? View.VISIBLE : View.GONE);
         viewBinding.header.butShowSettings.setVisibility(showSettingsButtons ? View.VISIBLE : View.GONE);
         viewBinding.header.butSubscribe.setVisibility(isNotSubscribed ? View.VISIBLE : View.GONE);
+        viewBinding.header.butSubscribe.setEnabled(serverSubscription == null || serverSubscription.isDisposed());
         viewBinding.header.butRestore.setVisibility(isArchived ? View.VISIBLE : View.GONE);
 
         if (isNotSubscribed && feed.getLastRefreshAttempt() < System.currentTimeMillis() - 1000L * 3600 * 24) {
@@ -549,11 +563,20 @@ public class FeedItemlistFragment extends Fragment implements AdapterView.OnItem
             if (feed == null) {
                 return;
             }
-            DBWriter.setFeedState(getContext(), feed, Feed.STATE_SUBSCRIBED);
-            MainActivityStarter mainActivityStarter = new MainActivityStarter(getContext());
-            mainActivityStarter.withOpenFeed(feed.getId());
-            getActivity().finish();
-            startActivity(mainActivityStarter.getIntent());
+            String serverUrl = PreferenceManager.getDefaultSharedPreferences(requireContext())
+                    .getString(MinusPodClient.PREF_SERVER_URL, "");
+            if (serverUrl.isEmpty()) {
+                subscribeNormally();
+                return;
+            }
+            new MaterialAlertDialogBuilder(requireContext())
+                    .setTitle(R.string.ad_removal_subscribe_title)
+                    .setMessage(R.string.ad_removal_subscribe_message)
+                    .setPositiveButton(R.string.ad_removal_subscribe, (dialog, which) ->
+                            subscribeViaServer(serverUrl, null))
+                    .setNeutralButton(R.string.ad_removal_subscribe_original, (dialog, which) -> subscribeNormally())
+                    .setNegativeButton(R.string.cancel_label, null)
+                    .show();
         });
         viewBinding.header.butRestore.setOnClickListener(v -> {
             if (feed == null) {
@@ -582,6 +605,64 @@ public class FeedItemlistFragment extends Fragment implements AdapterView.OnItem
             ClipboardUtils.copyText(viewBinding.header.txtvTitle);
             return true;
         });
+    }
+
+    private void subscribeNormally() {
+        DBWriter.setFeedState(getContext(), feed, Feed.STATE_SUBSCRIBED);
+        openSubscribedFeed(feed);
+    }
+
+    private void openSubscribedFeed(Feed subscribed) {
+        MainActivityStarter starter = new MainActivityStarter(requireContext()).withOpenFeed(subscribed.getId());
+        requireActivity().finish();
+        startActivity(starter.getIntent());
+    }
+
+    private void subscribeViaServer(String serverUrl, String password) {
+        viewBinding.header.butSubscribe.setEnabled(false);
+        viewBinding.header.butSubscribe.setText(R.string.ad_removal_connecting);
+        FragmentActivity activity = requireActivity();
+        Feed source = feed;
+        serverSubscription = Maybe.fromCallable(() -> {
+            MinusPodClient client = new MinusPodClient(serverUrl, AntennapodHttpClient.getHttpClient());
+            String processedUrl = client.subscribe(source.getDownloadUrl(), password);
+            return ProcessedFeedSubscription.subscribe(activity, source, processedUrl);
+        }).subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(processed -> {
+                    Toast.makeText(activity, R.string.ad_removal_processing, Toast.LENGTH_LONG).show();
+                    openSubscribedFeed(processed);
+                }, error -> {
+                    viewBinding.header.butSubscribe.setEnabled(true);
+                    viewBinding.header.butSubscribe.setText(R.string.subscribe_label);
+                    if (error instanceof MinusPodClient.ServerException
+                            && ((MinusPodClient.ServerException) error).status == 401 && password == null) {
+                        askServerPassword(serverUrl);
+                        return;
+                    }
+                    new MaterialAlertDialogBuilder(requireContext())
+                            .setTitle(R.string.error_label)
+                            .setMessage(R.string.ad_removal_failed)
+                            .setPositiveButton(android.R.string.ok, null)
+                            .show();
+                });
+    }
+
+    private void askServerPassword(String serverUrl) {
+        EditTextDialogBinding binding = EditTextDialogBinding.inflate(getLayoutInflater());
+        binding.textInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        binding.textInput.setSaveEnabled(false);
+        new MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.ad_removal_password)
+                .setMessage(R.string.ad_removal_password_message)
+                .setView(binding.getRoot())
+                .setPositiveButton(R.string.confirm_label, (dialog, which) -> {
+                    String password = binding.textInput.getText().toString();
+                    binding.textInput.setText("");
+                    subscribeViaServer(serverUrl, password);
+                })
+                .setNegativeButton(R.string.cancel_label, null)
+                .show();
     }
 
     private void showErrorDetails() {

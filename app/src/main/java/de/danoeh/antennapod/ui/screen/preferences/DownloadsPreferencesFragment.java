@@ -2,6 +2,10 @@ package de.danoeh.antennapod.ui.screen.preferences;
 
 import android.content.SharedPreferences;
 import android.os.Bundle;
+import android.text.InputType;
+import android.widget.Toast;
+import androidx.preference.EditTextPreference;
+import de.danoeh.antennapod.net.adremoval.MinusPodClient;
 import androidx.preference.PreferenceManager;
 import de.danoeh.antennapod.R;
 import de.danoeh.antennapod.net.download.serviceinterface.FeedUpdateManager;
@@ -24,6 +28,21 @@ public class DownloadsPreferencesFragment extends AnimatedPreferenceFragment
     public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
         addPreferencesFromResource(R.xml.preferences_downloads);
         setupNetworkScreen();
+        EditTextPreference server = findPreference(MinusPodClient.PREF_SERVER_URL);
+        server.setOnBindEditTextListener(input -> input.setInputType(
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI));
+        server.setOnPreferenceChangeListener((preference, value) -> {
+            if (((String) value).isEmpty()) {
+                return true;
+            }
+            try {
+                MinusPodClient.parseServerUrl((String) value);
+                return true;
+            } catch (IllegalArgumentException error) {
+                Toast.makeText(requireContext(), R.string.ad_removal_invalid_url, Toast.LENGTH_LONG).show();
+                return false;
+            }
+        });
     }
 
     @Override
